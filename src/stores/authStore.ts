@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { supabase } from '../config/supabase';
 import { User } from '../types/auth';
+import { v4 as uuidv4 } from 'uuid';
 
 interface AuthState {
   user: User | null;
@@ -77,7 +78,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ loading: true, error: null });
 
       const newUser = {
-        id: `user_${Date.now()}`,
+        id: uuidv4(), // Génère un UUID valide
         username: userData.username.toLowerCase(),
         password: userData.password,
         role: userData.role
