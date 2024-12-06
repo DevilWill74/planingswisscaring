@@ -1,98 +1,59 @@
 import { createClient } from '@supabase/supabase-js';
-import { User } from '../types/auth';
-import { Nurse, MonthlySchedule } from '../types/schedule';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
-  throw new Error('Missing environment variables: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY must be set');
+  throw new Error('Les variables d\'environnement Supabase ne sont pas définies');
 }
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Users
-export async function getUsers(): Promise<User[]> {
-  try {
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-      .order('username');
-    
-    if (error) throw error;
-    return data || [];
-  } catch (error) {
-    console.error('Error fetching users:', error);
-    throw error;
-  }
-}
+// Initialize schema
+const initSchema = async () => {
+  const { error: dropError } = await supabase.rpc('drop_all_tables', {});
+  
+  // Create users table
+  const { error: usersError } = await supabase.query(`
+    create table if not exists users (
+      id uuid default uuid_generate_v4() primary key,
+      username text unique not null,
+      password text not null,
+      role text not null check (role in ('admin', 'nurse')),
+      created_at timestamp with time zone default timezone('utc'::text, now()) not null
+    );
+  `);
 
-export async function saveUser(user: User): Promise<void> {
-  const { error } = await supabase
+  // Create planning table
+  const { error: planningError } = await supabase.query(`
+    create table if not exists planning (
+      id uuid default uuid_generate_v4() primary key,
+      user_id uuid references users(id) on delete cascade,
+      date date not null,
+      status text not null check (status in ('work', 'rest', 'vacation', 'training', 'unavailable', 'undefined')),
+      note text,
+      created_at timestamp with time zone default timezone('utc'::text, now()) not null,
+      unique(user_id, date)
+    );
+  `);
+
+  // Create default admin user
+  const { error: adminError } = await supabase
     .from('users')
-    .upsert([user]);
-  
-  if (error) throw error;
-}
+    .upsert([
+      {
+        username: 'admin',
+        password: 'admin123',
+        role: 'admin'
+      }
+    ], { onConflict: 'username' });
 
-// Nurses
-export async function getNurses(): Promise<Nurse[]> {
-  try {
-    const { data, error } = await supabase
-      .from('nurses')
-      .select('*')
-      .order('name');
-    
-    if (error) throw error;
-    return data || [];
-  } catch (error) {
-    console.error('Error fetching nurses:', error);
-    throw error;
+  if (usersError || planningError || adminError) {
+    console.error('Schema initialization errors:', { usersError, planningError, adminError });
   }
-}
+};
 
-export async function saveNurse(nurse: Nurse): Promise<void> {
-  const { error } = await supabase
-    .from('nurses')
-    .upsert([nurse]);
-  
-  if (error) throw error;
-}
+// Initialize schema on client creation
+initSchema().catch(console.error);
 
-export async function deleteNurse(nurseId: string): Promise<void> {
-  const { error } = await supabase
-    .from('nurses')
-    .delete()
-    .eq('id', nurseId);
-  
-  if (error) throw error;
-}
-
-// Schedule
-export async function getSchedule(): Promise<MonthlySchedule> {
-  try {
-    const { data, error } = await supabase
-      .from('schedules')
-      .select('*');
-    
-    if (error) throw error;
-    
-    const schedule: MonthlySchedule = {};
-    data?.forEach(item => {
-      schedule[item.key] = item.schedule;
-    });
-    
-    return schedule;
-  } catch (error) {
-    console.error('Error fetching schedule:', error);
-    throw error;
-  }
-}
-
-export async function saveSchedule(key: string, schedule: any): Promise<void> {
-  const { error } = await supabase
-    .from('schedules')
-    .upsert([{ key, schedule }]);
-  
-  if (error) throw error;
-}
+export { initSchema };

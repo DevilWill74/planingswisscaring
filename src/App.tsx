@@ -1,40 +1,24 @@
-import React, { useEffect } from 'react';
-import { NurseScheduler } from './components/NurseScheduler';
-import { Login } from './components/Login';
-import { useAuthStore } from './stores/authStore';
-import { useRealtimeSync } from './hooks/useRealtimeSync';
-import { initializeSupabase } from './config/supabaseInit';
+import React from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import Layout from './components/Layout';
+import Login from './pages/Login';
+import Planning from './pages/Planning';
+import UserManagement from './pages/UserManagement';
+import Profile from './pages/Profile';
 
 function App() {
-  const { user, initialize } = useAuthStore();
-  
-  // Initialisation de la base de données et synchronisation en temps réel
-  useEffect(() => {
-    const init = async () => {
-      try {
-        await initializeSupabase();
-        await initialize();
-      } catch (error) {
-        console.error('Erreur d\'initialisation:', error);
-      }
-    };
-    init();
-  }, [initialize]);
-
-  // Activer la synchronisation en temps réel
-  useRealtimeSync();
-
-  if (!user) {
-    return <Login />;
-  }
-
   return (
-    <div className="min-h-screen bg-gray-100">
-      <NurseScheduler 
-        isAdmin={user.role === 'admin'}
-        currentUser={user}
-      />
-    </div>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/" element={<Layout />}>
+          <Route index element={<Navigate to="/planning" replace />} />
+          <Route path="planning" element={<Planning />} />
+          <Route path="users" element={<UserManagement />} />
+          <Route path="profile" element={<Profile />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
   );
 }
 
