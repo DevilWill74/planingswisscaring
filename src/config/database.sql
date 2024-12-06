@@ -3,18 +3,19 @@ DROP TABLE IF EXISTS public.schedules CASCADE;
 DROP TABLE IF EXISTS public.nurses CASCADE;
 DROP TABLE IF EXISTS public.users CASCADE;
 
--- Create tables with proper structure
+-- Create tables with the adapted structure
+-- 'users' table now uses 'username' as the primary key (no UUID id)
 CREATE TABLE public.users (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    username TEXT UNIQUE NOT NULL,
+    username TEXT PRIMARY KEY,
     password TEXT NOT NULL,
     role TEXT NOT NULL CHECK (role IN ('admin', 'nurse')),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW())
 );
 
+-- 'nurses' now references 'users(username)' instead of an ID
 CREATE TABLE public.nurses (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+    user_username TEXT REFERENCES public.users(username) ON DELETE CASCADE,
     name TEXT NOT NULL,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc', NOW())
 );
@@ -59,8 +60,8 @@ CREATE POLICY "Allow insert access" ON public.users
         -- Allow inserts if no users exist (first user) or if current user is admin
         NOT EXISTS (SELECT 1 FROM public.users)
         OR EXISTS (
-            SELECT 1 FROM public.users 
-            WHERE id = auth.uid() 
+            SELECT 1 FROM public.users
+            WHERE username = auth.uid() 
             AND role = 'admin'
         )
     );
@@ -68,11 +69,11 @@ CREATE POLICY "Allow insert access" ON public.users
 CREATE POLICY "Allow update access" ON public.users
     FOR UPDATE TO public
     USING (
-        -- Allow admin to update any user, users can update their own record
+        -- Allow admin to update any user, or users can update their own record
         EXISTS (
-            SELECT 1 FROM public.users 
-            WHERE id = auth.uid() 
-            AND (role = 'admin' OR id = users.id)
+            SELECT 1 FROM public.users
+            WHERE username = auth.uid() 
+            AND (role = 'admin' OR username = users.username)
         )
     );
 
@@ -81,11 +82,17 @@ CREATE POLICY "Allow delete access" ON public.users
     USING (
         -- Only admin can delete users
         EXISTS (
-            SELECT 1 FROM public.users 
-            WHERE id = auth.uid() 
+            SELECT 1 FROM public.users
+            WHERE username = auth.uid() 
             AND role = 'admin'
         )
     );
+
+-- Drop existing policies for nurses
+DROP POLICY IF EXISTS "Allow read access" ON public.nurses;
+DROP POLICY IF EXISTS "Allow insert access" ON public.nurses;
+DROP POLICY IF EXISTS "Allow update access" ON public.nurses;
+DROP POLICY IF EXISTS "Allow delete access" ON public.nurses;
 
 -- Create policies for nurses table
 CREATE POLICY "Allow read access" ON public.nurses
@@ -97,8 +104,8 @@ CREATE POLICY "Allow insert access" ON public.nurses
     WITH CHECK (
         -- Only admin can create nurses
         EXISTS (
-            SELECT 1 FROM public.users 
-            WHERE id = auth.uid() 
+            SELECT 1 FROM public.users
+            WHERE username = auth.uid() 
             AND role = 'admin'
         )
     );
@@ -108,11 +115,13 @@ CREATE POLICY "Allow update access" ON public.nurses
     USING (
         -- Admin can update any nurse, nurses can update their own record
         EXISTS (
-            SELECT 1 FROM public.users 
-            WHERE id = auth.uid() 
+            SELECT 1 FROM public.users u
+            WHERE u.username = auth.uid()
             AND (
-                role = 'admin' 
-                OR id = nurses.user_id
+                u.role = 'admin' 
+                OR u.username = (
+                    SELECT user_username FROM public.nurses n WHERE n.id = nurses.id
+                )
             )
         )
     );
@@ -122,11 +131,15 @@ CREATE POLICY "Allow delete access" ON public.nurses
     USING (
         -- Only admin can delete nurses
         EXISTS (
-            SELECT 1 FROM public.users 
-            WHERE id = auth.uid() 
+            SELECT 1 FROM public.users
+            WHERE username = auth.uid() 
             AND role = 'admin'
         )
     );
+
+-- Drop existing policies for schedules
+DROP POLICY IF EXISTS "Allow read access" ON public.schedules;
+DROP POLICY IF EXISTS "Allow write access" ON public.schedules;
 
 -- Create policies for schedules table
 CREATE POLICY "Allow read access" ON public.schedules
@@ -136,11 +149,12 @@ CREATE POLICY "Allow read access" ON public.schedules
 CREATE POLICY "Allow write access" ON public.schedules
     FOR ALL TO public
     USING (
-        -- Admin can modify any schedule, nurses can only modify their own
+        -- Admin can modify any schedule,
+        -- Nurses can only modify schedules corresponding to their own nurse record
         EXISTS (
             SELECT 1 FROM public.users u
-            JOIN public.nurses n ON n.user_id = u.id
-            WHERE u.id = auth.uid()
+            JOIN public.nurses n ON n.user_username = u.username
+            WHERE u.username = auth.uid()
             AND (
                 u.role = 'admin'
                 OR n.id = schedules.nurse_id
@@ -159,7 +173,7 @@ BEGIN
     SELECT * INTO v_user
     FROM public.users
     WHERE username = p_username
-    AND password = p_password;
+      AND password = p_password;
     
     RETURN v_user;
 END;
